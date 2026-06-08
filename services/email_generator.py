@@ -73,19 +73,32 @@ class EmailGeneratorService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        # Prefer xAI Grok if key is provided, fallback to OpenAI
-        if settings.xai_api_key:
+        # Priority: OpenRouter (free) → xAI → OpenAI
+        if settings.openrouter_api_key:
+            self._api_key = settings.openrouter_api_key
+            self._model = settings.openrouter_model
+            self._base_url = "https://openrouter.ai/api/v1/chat/completions"
+            self._provider = "OpenRouter"
+            self._extra_headers = {
+                "HTTP-Referer": "https://localhost",
+                "X-Title": "Cold Outreach Pipeline",
+            }
+        elif settings.xai_api_key:
             self._api_key = settings.xai_api_key
             self._model = settings.xai_model
             self._base_url = "https://api.x.ai/v1/chat/completions"
             self._provider = "xAI"
+            self._extra_headers = {}
         elif settings.openai_api_key:
             self._api_key = settings.openai_api_key
             self._model = settings.openai_model
             self._base_url = "https://api.openai.com/v1/chat/completions"
             self._provider = "OpenAI"
+            self._extra_headers = {}
         else:
-            raise EmailGenerationError("No AI API key configured. Set OPENAI_API_KEY or XAI_API_KEY in .env")
+            raise EmailGenerationError(
+                "No AI API key configured. Set OPENROUTER_API_KEY, XAI_API_KEY, or OPENAI_API_KEY in .env"
+            )
         self._max_words = settings.email_max_words
         self._system_prompt = SYSTEM_PROMPT_TEMPLATE.format(max_words=self._max_words)
 
@@ -131,15 +144,17 @@ class EmailGeneratorService:
             reraise=True,
         )
         async def _call_api() -> httpx.Response:
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
+            headers.update(self._extra_headers)
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._settings.request_timeout_seconds)
             ) as client:
                 resp = await client.post(
                     self._base_url,
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json=payload,
                 )
                 resp.raise_for_status()
@@ -157,12 +172,9 @@ class EmailGeneratorService:
             raise EmailGenerationError(f"{self._provider} network error: {exc}") from exc
 
         data = resp.json()
-        raw_text = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        choice = data.get("choices", [{}])[0] if data.get("choices") else {}
+        message = choice.get("message", {}) if choice else {}
+        raw_text = str(message.get("content", "")).strip()
 
         return self._parse_email_json(raw_text, name=name, title=title)
 
