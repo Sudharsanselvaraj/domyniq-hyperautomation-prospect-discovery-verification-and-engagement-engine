@@ -119,7 +119,6 @@ def run(
     domain: str = typer.Argument(
         ...,
         help="Seed company domain, e.g. openai.com",
-        metavar="DOMAIN",
     ),
     dry_run: bool = typer.Option(
         False,
