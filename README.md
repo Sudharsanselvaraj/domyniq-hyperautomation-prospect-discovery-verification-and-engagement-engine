@@ -4,7 +4,7 @@
 <tr>
 <td width="160" align="center">
 
-<img src="assets/ChatGPT Image Jun 8, 2026, 08_33_22 AM.png" width="120">
+<img src="assets/ChatGPT Image Jun 8, 2026, 08_33_22 AM.png" width="100">
 
 </td>
 
