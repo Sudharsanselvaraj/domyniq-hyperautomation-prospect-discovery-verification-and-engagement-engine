@@ -1,5 +1,5 @@
 <div align="center">
-  <img alt="Domyniq Logo" src="assets/ChatGPT Image Jun 8, 2026, 08_33_22 AM.png" width="45%">
+  <img alt="Domyniq Logo" src="assets/ChatGPT Image Jun 8, 2026, 08_56_38 AM.png" width="45%">
 </div>
 
 <div align="center">
