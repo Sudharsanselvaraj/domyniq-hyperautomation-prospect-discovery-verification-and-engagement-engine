@@ -26,9 +26,8 @@ from utils.resume import ResumableRun
 
 def _make_settings():
     s = MagicMock()
-    s.ocean_api_key = "ocean-key"
+    s.apollo_api_key = "apollo-key"
     s.prospeo_api_key = "prospeo-key"
-    s.eazyreach_api_key = "eazyreach-key"
     s.brevo_api_key = "brevo-key"
     s.openai_api_key = "openai-key"
     s.openai_model = "gpt-4o-mini"
@@ -39,48 +38,50 @@ def _make_settings():
     s.retry_max_attempts = 2
     s.retry_wait_min_seconds = 0.01
     s.retry_wait_max_seconds = 0.1
+    s.prospeo_enrich_delay_seconds = 0
     s.sender_name = "Test Sender"
     s.sender_email = "test@example.com"
     return s
 
 
-def _make_contact(name="Jane", title="CTO", linkedin_slug="jane", domain="acme.com"):
+def _make_contact(name="Jane", title="CTO", linkedin_slug="jane", domain="acme.com", person_id=None):
     return Contact(
         name=name,
         title=title,
         linkedin_url=f"https://linkedin.com/in/{linkedin_slug}",
         company_domain=domain,
+        person_id=person_id or f"pid_{linkedin_slug}",
     )
 
 
-class TestStage1Ocean:
+class TestStage1Apollo:
     @pytest.mark.asyncio
     async def test_returns_companies(self):
-        from clients.ocean_client import OceanClient
+        from clients.apollo_client import ApolloClient
 
         companies = [
             Company(domain="stripe.com", name="Stripe"),
             Company(domain="braintree.com", name="Braintree"),
         ]
 
-        with patch.object(OceanClient, "__aenter__", return_value=AsyncMock(
+        with patch.object(ApolloClient, "__aenter__", return_value=AsyncMock(
             find_similar_companies=AsyncMock(return_value=companies)
         )):
-            async with OceanClient(_make_settings()) as client:
+            async with ApolloClient(_make_settings()) as client:
                 result = await client.find_similar_companies("paypal.com", limit=5)
 
         assert len(result) == 2
         assert result[0].domain == "stripe.com"
 
-    def test_parse_ocean_response(self):
-        from clients.ocean_client import OceanClient
+    def test_parse_apollo_response(self):
+        from clients.apollo_client import ApolloClient
 
-        client = OceanClient.__new__(OceanClient)
+        client = ApolloClient.__new__(ApolloClient)
         data = {
-            "companies": [
-                {"domain": "stripe.com", "name": "Stripe"},
-                {"domain": "paypal.com"},  # should be excluded as seed
-                {"domain": "  "},          # should be skipped
+            "organizations": [
+                {"website_url": "https://stripe.com", "name": "Stripe"},
+                {"website_url": "https://paypal.com"},  # should be excluded as seed
+                {"website_url": "  "},                   # should be skipped
             ]
         }
         result = client._parse_response(data, exclude_domain="paypal.com")
@@ -89,67 +90,95 @@ class TestStage1Ocean:
 
 
 class TestStage2Prospeo:
-    def test_decision_maker_filter(self):
-        from clients.prospeo_client import ProspeoClient
-
-        assert ProspeoClient._is_decision_maker("Chief Executive Officer")
-        assert ProspeoClient._is_decision_maker("VP of Engineering")
-        assert ProspeoClient._is_decision_maker("Head of Product")
-        assert not ProspeoClient._is_decision_maker("Software Engineer")
-        assert not ProspeoClient._is_decision_maker("Marketing Analyst")
-
-    def test_parse_prospeo_response(self):
+    def test_parse_search_response(self):
         from clients.prospeo_client import ProspeoClient
 
         client = ProspeoClient.__new__(ProspeoClient)
         data = {
-            "response": [
+            "results": [
                 {
-                    "full_name": "Jane Smith",
-                    "job_title": "CTO",
-                    "linkedin_url": "https://linkedin.com/in/jane",
-                    "company": "Acme",
+                    "person": {
+                        "person_id": "abc123",
+                        "full_name": "Jane Smith",
+                        "current_job_title": "CTO",
+                        "linkedin_url": "https://linkedin.com/in/jane",
+                    },
+                    "company": {"name": "Acme"},
                 },
                 {
-                    "full_name": "",          # no name — should be skipped
-                    "job_title": "VP Sales",
-                    "linkedin_url": "https://linkedin.com/in/nobody",
-                },
-                {
-                    "full_name": "Bob Jones",
-                    "job_title": "Software Engineer",  # not a DM
-                    "linkedin_url": "https://linkedin.com/in/bob",
+                    "person": {
+                        "person_id": "def456",
+                        "first_name": "",
+                        "last_name": "",
+                        "linkedin_url": "https://linkedin.com/in/nobody",
+                    },
+                    "company": {},
                 },
             ]
         }
-        result = client._parse_response(data, "acme.com")
+        result = client._parse_search_response(data, "acme.com")
         assert len(result) == 1
         assert result[0].name == "Jane Smith"
+        assert result[0].person_id == "abc123"
 
 
-class TestStage3EazyReach:
-    def test_parse_eazyreach_verified(self):
-        from clients.eazyreach_client import EazyReachClient
+class TestStage3ProspeoEmail:
+    @pytest.mark.asyncio
+    async def test_bulk_enrich_returns_email_map(self):
+        from clients.prospeo_client import ProspeoClient
 
-        client = EazyReachClient.__new__(EazyReachClient)
-        data = {"email": "jane@acme.com", "verified": True, "confidence": 0.95}
-        result = client._parse_response(data, "https://linkedin.com/in/jane")
-        assert result == "jane@acme.com"
+        client = ProspeoClient.__new__(ProspeoClient)
+        client._api_key = "test-key"
+        client._settings = _make_settings()
+        client.service_name = "Prospeo"
 
-    def test_parse_eazyreach_unverified_returns_none(self):
-        from clients.eazyreach_client import EazyReachClient
+        contacts = [
+            _make_contact("Jane", "CTO", "jane", person_id="pid_jane"),
+            _make_contact("Bob", "CEO", "bob", person_id="pid_bob"),
+        ]
 
-        client = EazyReachClient.__new__(EazyReachClient)
-        data = {"email": "jane@acme.com", "verified": False}
-        result = client._parse_response(data, "https://linkedin.com/in/jane")
-        assert result is None
+        mock_response = {
+            "error": False,
+            "matched": [
+                {
+                    "identifier": "pid_jane",
+                    "person": {"email": {"email": "jane@acme.com"}},
+                },
+                {
+                    "identifier": "pid_bob",
+                    "person": {"email": {"email": "bob@acme.com"}},
+                },
+            ],
+        }
 
-    def test_parse_eazyreach_no_email_returns_none(self):
-        from clients.eazyreach_client import EazyReachClient
+        with patch.object(client, "_post", return_value=mock_response):
+            result = await client.bulk_enrich_emails(contacts)
 
-        client = EazyReachClient.__new__(EazyReachClient)
-        result = client._parse_response({}, "https://linkedin.com/in/jane")
-        assert result is None
+        assert result == {"pid_jane": "jane@acme.com", "pid_bob": "bob@acme.com"}
+
+    @pytest.mark.asyncio
+    async def test_bulk_enrich_partial_match(self):
+        from clients.prospeo_client import ProspeoClient
+
+        client = ProspeoClient.__new__(ProspeoClient)
+        client._api_key = "test-key"
+        client._settings = _make_settings()
+        client.service_name = "Prospeo"
+
+        contacts = [
+            _make_contact("Jane", "CTO", "jane", person_id="pid_jane"),
+        ]
+
+        mock_response = {
+            "error": False,
+            "matched": [],
+            "not_matched": ["pid_jane"],
+        }
+
+        with patch.object(client, "_post", return_value=mock_response):
+            result = await client.bulk_enrich_emails(contacts)
+
+        assert result == {}
 
 
 class TestStage4Brevo:
@@ -177,23 +206,20 @@ class TestFullPipelineFlow:
 
         settings = _make_settings()
 
-        # Mock companies returned by Ocean.io
+        # Mock companies returned by Apollo.io
         mock_companies = [Company(domain="acme.com")]
 
-        # Mock contacts returned by Prospeo
+        # Mock contacts returned by Prospeo Search
         mock_contacts = [
             _make_contact("Jane Smith", "CTO", "janesmith"),
             _make_contact("Bob Jones", "CEO", "bobjones"),
         ]
 
-        # Mock emails returned by EazyReach
+        # Mock emails returned by Prospeo Bulk Enrich
         email_map = {
-            "https://linkedin.com/in/janesmith": "jane@acme.com",
-            "https://linkedin.com/in/bobjones": "bob@acme.com",
+            "pid_janesmith": "jane@acme.com",
+            "pid_bobjones": "bob@acme.com",
         }
-
-        async def fake_get_email(linkedin_url):
-            return email_map.get(linkedin_url)
 
         progress = Progress()
         resumable = ResumableRun("acme.com")
@@ -207,30 +233,23 @@ class TestFullPipelineFlow:
         )
 
         with (
-            patch("services.orchestrator.OceanClient") as MockOcean,
+            patch("services.orchestrator.ApolloClient") as MockApollo,
             patch("services.orchestrator.ProspeoClient") as MockProspeo,
-            patch("services.orchestrator.EazyReachClient") as MockEazy,
         ):
-            # Configure Ocean mock
-            ocean_instance = AsyncMock()
-            ocean_instance.find_similar_companies = AsyncMock(return_value=mock_companies)
-            ocean_instance.__aenter__ = AsyncMock(return_value=ocean_instance)
-            ocean_instance.__aexit__ = AsyncMock(return_value=None)
-            MockOcean.return_value = ocean_instance
+            # Configure Apollo mock
+            apollo_instance = AsyncMock()
+            apollo_instance.find_similar_companies = AsyncMock(return_value=mock_companies)
+            apollo_instance.__aenter__ = AsyncMock(return_value=apollo_instance)
+            apollo_instance.__aexit__ = AsyncMock(return_value=None)
+            MockApollo.return_value = apollo_instance
 
             # Configure Prospeo mock
             prospeo_instance = AsyncMock()
-            prospeo_instance.get_decision_makers = AsyncMock(return_value=mock_contacts)
+            prospeo_instance.search_decision_makers = AsyncMock(return_value=mock_contacts)
+            prospeo_instance.bulk_enrich_emails = AsyncMock(return_value=email_map)
             prospeo_instance.__aenter__ = AsyncMock(return_value=prospeo_instance)
             prospeo_instance.__aexit__ = AsyncMock(return_value=None)
             MockProspeo.return_value = prospeo_instance
-
-            # Configure EazyReach mock
-            eazy_instance = AsyncMock()
-            eazy_instance.get_email = AsyncMock(side_effect=fake_get_email)
-            eazy_instance.__aenter__ = AsyncMock(return_value=eazy_instance)
-            eazy_instance.__aexit__ = AsyncMock(return_value=None)
-            MockEazy.return_value = eazy_instance
 
             result = await orchestrator.execute("paypal.com")
 
@@ -275,7 +294,7 @@ class TestFullPipelineFlow:
 
         call_count = {"n": 0}
 
-        async def mock_get_dm(domain, **kwargs):
+        async def mock_search_dm(domain, **kwargs):
             call_count["n"] += 1
             if domain == "bad.com":
                 raise ProspeoError("simulated failure")
@@ -283,31 +302,24 @@ class TestFullPipelineFlow:
                 return [contact]
             return [contact2]
 
-        with patch("services.orchestrator.OceanClient") as MockOcean, \
-             patch("services.orchestrator.ProspeoClient") as MockProspeo, \
-             patch("services.orchestrator.EazyReachClient") as MockEazy:
+        with patch("services.orchestrator.ApolloClient") as MockApollo, \
+             patch("services.orchestrator.ProspeoClient") as MockProspeo:
 
-            ocean_instance = AsyncMock()
-            ocean_instance.find_similar_companies = AsyncMock(return_value=mock_companies)
-            ocean_instance.__aenter__ = AsyncMock(return_value=ocean_instance)
-            ocean_instance.__aexit__ = AsyncMock(return_value=None)
-            MockOcean.return_value = ocean_instance
+            apollo_instance = AsyncMock()
+            apollo_instance.find_similar_companies = AsyncMock(return_value=mock_companies)
+            apollo_instance.__aenter__ = AsyncMock(return_value=apollo_instance)
+            apollo_instance.__aexit__ = AsyncMock(return_value=None)
+            MockApollo.return_value = apollo_instance
 
             prospeo_instance = AsyncMock()
-            prospeo_instance.get_decision_makers = AsyncMock(side_effect=mock_get_dm)
+            prospeo_instance.search_decision_makers = AsyncMock(side_effect=mock_search_dm)
+            # Return unique email per person_id to survive dedup
+            async def _bulk_enrich(contacts):
+                return {c.person_id: f"{c.person_id}@test.com" for c in contacts if c.person_id}
+            prospeo_instance.bulk_enrich_emails = AsyncMock(side_effect=_bulk_enrich)
             prospeo_instance.__aenter__ = AsyncMock(return_value=prospeo_instance)
             prospeo_instance.__aexit__ = AsyncMock(return_value=None)
             MockProspeo.return_value = prospeo_instance
-
-            eazy_instance = AsyncMock()
-            # Return unique email per LinkedIn URL to survive dedup
-            async def _unique_email(linkedin_url):
-                slug = linkedin_url.rstrip("/").split("/")[-1]
-                return f"{slug}@test.com"
-            eazy_instance.get_email = AsyncMock(side_effect=_unique_email)
-            eazy_instance.__aenter__ = AsyncMock(return_value=eazy_instance)
-            eazy_instance.__aexit__ = AsyncMock(return_value=None)
-            MockEazy.return_value = eazy_instance
 
             result = await orchestrator.execute("paypal.com")
 
