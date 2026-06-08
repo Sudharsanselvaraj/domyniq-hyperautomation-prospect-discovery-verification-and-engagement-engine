@@ -1,7 +1,6 @@
 <div align="center">
-  <img alt="Domyniq Logo" src="assets/ChatGPT Image Jun 8, 2026, 08_56_38 AM.png" width="45%">
+  <img alt="Domyniq Logo" src="assets/ChatGPT Image Jun 8, 2026, 08_56_38 AM.png" width="35%">
 </div>
-
 <div align="center">
   <h3>Autonomous Prospect Intelligence Platform.</h3>
 </div>
@@ -23,8 +22,6 @@
     <img src="https://img.shields.io/badge/architecture-agentic-purple" alt="Architecture">
   </a>
 </div>
-
-<br>
 
 Domyniq is an autonomous prospect intelligence platform that transforms a single company domain into verified decision-makers and personalized outreach campaigns. It orchestrates company discovery, contact enrichment, email verification, AI-powered personalization, and outbound delivery through a resilient hyperautomation pipeline.
 
