@@ -73,8 +73,14 @@ class EmailGeneratorService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        # Priority: OpenRouter (free) → xAI → OpenAI
-        if settings.openrouter_api_key:
+        # Priority: Ollama (local) → OpenRouter (free) → xAI → OpenAI
+        if settings.ollama_base_url:
+            self._api_key = ""
+            self._model = settings.ollama_model
+            self._base_url = f"{settings.ollama_base_url}/api/generate"
+            self._provider = "Ollama"
+            self._extra_headers = {}
+        elif settings.openrouter_api_key:
             self._api_key = settings.openrouter_api_key
             self._model = settings.openrouter_model
             self._base_url = "https://openrouter.ai/api/v1/chat/completions"
@@ -97,7 +103,7 @@ class EmailGeneratorService:
             self._extra_headers = {}
         else:
             raise EmailGenerationError(
-                "No AI API key configured. Set OPENROUTER_API_KEY, XAI_API_KEY, or OPENAI_API_KEY in .env"
+                "No AI provider configured. Set OLLAMA_BASE_URL, OPENROUTER_API_KEY, XAI_API_KEY, or OPENAI_API_KEY in .env"
             )
         self._max_words = settings.email_max_words
         self._system_prompt = SYSTEM_PROMPT_TEMPLATE.format(max_words=self._max_words)
@@ -122,15 +128,23 @@ class EmailGeneratorService:
             company=company,
         )
 
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 400,
-        }
+        if self._provider == "Ollama":
+            payload = {
+                "model": self._model,
+                "prompt": f"{self._system_prompt}\n\n{user_content}",
+                "stream": False,
+                "options": {"temperature": 0.7},
+            }
+        else:
+            payload = {
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 400,
+            }
 
         @retry(
             retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
@@ -144,10 +158,9 @@ class EmailGeneratorService:
             reraise=True,
         )
         async def _call_api() -> httpx.Response:
-            headers = {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = {"Content-Type": "application/json"}
+            if self._api_key:
+                headers["Authorization"] = f"Bearer {self._api_key}"
             headers.update(self._extra_headers)
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._settings.request_timeout_seconds)
@@ -172,9 +185,12 @@ class EmailGeneratorService:
             raise EmailGenerationError(f"{self._provider} network error: {exc}") from exc
 
         data = resp.json()
-        choice = data.get("choices", [{}])[0] if data.get("choices") else {}
-        message = choice.get("message", {}) if choice else {}
-        raw_text = str(message.get("content", "")).strip()
+        if self._provider == "Ollama":
+            raw_text = str(data.get("response", "")).strip()
+        else:
+            choice = data.get("choices", [{}])[0] if data.get("choices") else {}
+            message = choice.get("message", {}) if choice else {}
+            raw_text = str(message.get("content", "")).strip()
 
         return self._parse_email_json(raw_text, name=name, title=title)
 

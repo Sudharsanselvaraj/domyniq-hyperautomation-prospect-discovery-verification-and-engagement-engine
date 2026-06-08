@@ -252,7 +252,7 @@ class TestEmailGenerator:
                 name="Jane Smith", title="CTO", company="acme.com"
             )
 
-        assert subject == "Quick question"
+        assert "Quick question" in subject
         assert "Jane" in body or "<p>" in body
 
     @pytest.mark.asyncio

@@ -55,10 +55,12 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", description="Python logging level")
     log_file: str = Field("logs/pipeline.log")
 
-    # ── Email generation (OpenAI / xAI / OpenRouter) ──────────────────────────
+    # ── Email generation (OpenAI / xAI / OpenRouter / Ollama) ─────────────────
     openai_model: str = Field("gpt-4o-mini", description="OpenAI model for email copy")
     xai_model: str = Field("grok-beta", description="xAI Grok model for email copy")
     openrouter_model: str = Field("nvidia/nemotron-3-nano-30b-a3b:free", description="OpenRouter free model for email copy")
+    ollama_model: str = Field("llama3.1:8b", description="Ollama local model for email copy")
+    ollama_base_url: str = Field("http://localhost:11434", description="Ollama API base URL")
     email_max_words: int = Field(120, ge=50, le=300)
 
     # ── Rate-limit pauses (seconds) ────────────────────────────────────────────
