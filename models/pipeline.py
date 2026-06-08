@@ -13,10 +13,10 @@ Interview talking point:
    of silently propagating bad data downstream."
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class Company(BaseModel):
@@ -55,6 +55,18 @@ class Contact(BaseModel):
     linkedin_url: str = Field(..., description="LinkedIn profile URL")
     company_domain: str
     company_name: Optional[str] = None
+    email: Optional[str] = Field(None, description="Work email if already known")
+    person_id: Optional[str] = Field(None, description="Prospeo person ID for enrichment")
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if "@" not in v:
+            return None
+        return v
 
     @field_validator("linkedin_url")
     @classmethod
@@ -89,7 +101,7 @@ class Lead(BaseModel):
     email_body: Optional[str] = None
     email_sent: bool = False
     email_send_error: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("email")
     @classmethod
@@ -107,6 +119,8 @@ class Lead(BaseModel):
             "title": self.contact.title,
             "linkedin": self.contact.linkedin_url,
             "email": self.email,
+            "email_subject": self.email_subject or "",
+            "email_body": self.email_body or "",
             "email_sent": self.email_sent,
             "timestamp": self.timestamp.isoformat(),
         }
@@ -119,7 +133,7 @@ class EmailResult(BaseModel):
     success: bool
     message_id: Optional[str] = None
     error: Optional[str] = None
-    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    sent_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class PipelineResult(BaseModel):
@@ -129,7 +143,7 @@ class PipelineResult(BaseModel):
     leads: list[Lead] = Field(default_factory=list)
     metrics: "PipelineMetricsSnapshot"
     failures: list[dict] = Field(default_factory=list)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: Optional[datetime] = None
 
 

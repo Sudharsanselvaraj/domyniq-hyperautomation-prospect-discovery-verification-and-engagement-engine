@@ -75,6 +75,11 @@ class ValidationError(PipelineError):
 
 # ── Stage-specific Errors ─────────────────────────────────────────────────────
 
+class ApolloError(APIError):
+    """Apollo.io specific error."""
+    pass
+
+
 class OceanError(APIError):
     """Ocean.io specific error."""
     pass

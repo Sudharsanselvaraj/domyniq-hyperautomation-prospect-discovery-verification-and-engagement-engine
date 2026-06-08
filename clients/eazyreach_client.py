@@ -52,8 +52,6 @@ class EazyReachClient(BaseClient):
 
         try:
             data = await self._post("/api/v1/email", json=payload)
-        except EazyReachError:
-            raise
         except Exception as exc:
             raise EazyReachError(
                 f"Failed to resolve email for {linkedin_url}: {exc}",

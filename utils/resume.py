@@ -4,6 +4,10 @@ utils/resume.py — Resumable Run Checkpointing
 Saves pipeline state to data/.checkpoints/<domain>.json after each stage
 so a run can be resumed from where it left off.
 
+Stage-level checkpoints are saved after Stage 1 (Ocean.io), Stage 2 (Prospeo),
+and Stage 3 (EazyReach) complete. Per-item checkpoints within Stage 2 and 3
+allow resuming mid-stage so expensive API calls are not repeated.
+
 Interview talking point:
   "Stage 2 and 3 make one API call per company/contact.
    For 25 companies × 5 contacts that's 125+ calls. If the run
@@ -43,6 +47,10 @@ class ResumableRun:
         except OSError as exc:
             logger.warning(f"Could not save checkpoint: {exc}")
 
+    def save(self) -> None:
+        """Public save hook for signal handlers."""
+        self._save()
+
     def has_checkpoint(self) -> bool:
         return self._path.exists() and bool(self._state)
 
@@ -58,6 +66,8 @@ class ResumableRun:
         if self._path.exists():
             self._path.unlink()
 
+    # ── Stage-level checkpoints ────────────────────────────────────────────────
+
     def get_stage_done(self, stage: str) -> bool:
         return self._state.get(f"stage_{stage}_done", False)
 
@@ -69,3 +79,36 @@ class ResumableRun:
 
     def get_stage_data(self, stage: str) -> Optional[Any]:
         return self._state.get(f"stage_{stage}_data")
+
+    # ── Per-item checkpoints (for mid-stage resume) ────────────────────────────
+
+    def is_item_processed(self, stage: str, item_key: str) -> bool:
+        """Check if a single item (company domain, linkedin url, etc.) was already processed."""
+        processed = self._state.get(f"stage_{stage}_processed", [])
+        return item_key in processed
+
+    def mark_item_processed(self, stage: str, item_key: str, data: Optional[Any] = None) -> None:
+        """Mark a single item as processed and optionally store its result."""
+        key = f"stage_{stage}_processed"
+        if key not in self._state:
+            self._state[key] = []
+        if item_key not in self._state[key]:
+            self._state[key].append(item_key)
+
+        if data is not None:
+            results_key = f"stage_{stage}_results"
+            if results_key not in self._state:
+                self._state[results_key] = []
+            self._state[results_key].append(data)
+
+        self._save()
+
+    def get_item_results(self, stage: str) -> list[Any]:
+        """Return stored results for a stage's per-item checkpoint."""
+        return self._state.get(f"stage_{stage}_results", [])
+
+    def clear_item_checkpoint(self, stage: str) -> None:
+        """Clear per-item tracking for a stage (call after stage completes successfully)."""
+        self._state.pop(f"stage_{stage}_processed", None)
+        self._state.pop(f"stage_{stage}_results", None)
+        self._save()

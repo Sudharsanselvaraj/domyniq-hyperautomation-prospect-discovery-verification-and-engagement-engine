@@ -15,6 +15,8 @@ Interview talking point:
    subject, body, from/to — simple and auditable."
 """
 
+import re
+
 from clients.base import BaseClient
 from config.settings import Settings
 from models.pipeline import EmailResult
@@ -71,8 +73,6 @@ class BrevoClient(BaseClient):
 
         try:
             data = await self._post("/v3/smtp/email", json=payload)
-        except BrevoError:
-            raise
         except Exception as exc:
             raise BrevoError(
                 f"Failed to send email to {to_email}: {exc}",
@@ -96,7 +96,6 @@ class BrevoClient(BaseClient):
         Minimal HTML-to-text for the textContent fallback.
         A full parser is overkill here — we just need readable plain text.
         """
-        import re
         text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
         text = re.sub(r"<[^>]+>", "", text)
         text = re.sub(r"\n{3,}", "\n\n", text)

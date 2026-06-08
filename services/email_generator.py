@@ -20,29 +20,38 @@ import re
 from typing import Optional
 
 import httpx
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+    RetryError,
+)
+import logging
 
 from config.settings import Settings
-from utils.exceptions import EmailGenerationError
+from utils.exceptions import EmailGenerationError, ServiceUnavailableError
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """You are an expert B2B outreach copywriter.
+SYSTEM_PROMPT_TEMPLATE = """You are an expert B2B outreach copywriter.
 Your task: write a cold outreach email from a sales professional to a senior decision-maker.
 
 Rules:
 - Professional and respectful tone
 - Personalised to their specific role
 - NEVER mention their company name in a generic way; make it feel tailored
-- Under 120 words for the body
+- Under {max_words} words for the body
 - No spam words (FREE, guaranteed, limited-time, etc.)
 - End with a single, low-friction CTA (e.g. "Would you have 15 minutes this week?")
 
 Output ONLY valid JSON in this exact format:
-{
+{{
   "subject": "...",
   "body": "..."
-}
+}}
 No preamble, no markdown fences, only the JSON object."""
 
 USER_TEMPLATE = """Write a cold outreach email for the following contact:
@@ -67,6 +76,7 @@ class EmailGeneratorService:
         self._api_key = settings.openai_api_key
         self._model = settings.openai_model
         self._max_words = settings.email_max_words
+        self._system_prompt = SYSTEM_PROMPT_TEMPLATE.format(max_words=self._max_words)
 
     async def generate(
         self,
@@ -91,16 +101,27 @@ class EmailGeneratorService:
         payload = {
             "model": self._model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": user_content},
             ],
             "temperature": 0.7,
             "max_tokens": 400,
         }
 
-        try:
+        @retry(
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+            stop=stop_after_attempt(self._settings.retry_max_attempts),
+            wait=wait_exponential(
+                multiplier=1,
+                min=self._settings.retry_wait_min_seconds,
+                max=self._settings.retry_wait_max_seconds,
+            ),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )
+        async def _call_openai() -> httpx.Response:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0)
+                timeout=httpx.Timeout(self._settings.request_timeout_seconds)
             ) as client:
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
@@ -111,6 +132,12 @@ class EmailGeneratorService:
                     json=payload,
                 )
                 resp.raise_for_status()
+                return resp
+
+        try:
+            resp = await _call_openai()
+        except RetryError as exc:
+            raise EmailGenerationError(f"OpenAI failed after retries: {exc}") from exc
         except httpx.HTTPStatusError as exc:
             raise EmailGenerationError(
                 f"OpenAI API error {exc.response.status_code}: {exc.response.text[:200]}"

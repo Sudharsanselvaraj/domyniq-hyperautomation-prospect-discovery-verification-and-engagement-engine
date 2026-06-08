@@ -96,7 +96,8 @@ class TestLeadModel:
         lead = Lead(contact=contact, email="jane@acme.com")
         row = lead.to_csv_row()
         assert set(row.keys()) == {
-            "company", "contact", "title", "linkedin", "email", "email_sent", "timestamp"
+            "company", "contact", "title", "linkedin", "email",
+            "email_subject", "email_body", "email_sent", "timestamp"
         }
 
 
