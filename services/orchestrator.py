@@ -2,9 +2,9 @@
 services/orchestrator.py — Pipeline Orchestrator
 
 The orchestrator is the heart of the system. It coordinates all four stages:
-  Stage 1: Ocean.io   — find similar companies
+  Stage 1: Apollo.io  — find similar companies
   Stage 2: Prospeo    — find decision-makers per company
-  Stage 3: EazyReach  — resolve LinkedIn → email
+  Stage 3: Prospeo    — resolve name+domain → work email (replaces EazyReach)
   Stage 4: Brevo      — send personalised outreach
 
 Key design decisions:
@@ -29,19 +29,17 @@ from typing import Optional
 
 from rich.progress import Progress, TaskID
 
+from clients.apollo_client import ApolloClient
 from clients.brevo_client import BrevoClient
-from clients.eazyreach_client import EazyReachClient
-from clients.ocean_client import OceanClient
 from clients.prospeo_client import ProspeoClient
 from config.settings import Settings
-from models.pipeline import Company, Contact, Lead, PipelineMetricsSnapshot
+from models.pipeline import Company, Contact, Lead
 from services.email_generator import EmailGeneratorService
 from utils.dedup import deduplicate_companies, deduplicate_contacts, deduplicate_leads
 from utils.exceptions import (
+    ApolloError,
     BrevoError,
     CircuitOpenError,
-    EazyReachError,
-    OceanError,
     PipelineError,
     ProspeoError,
 )
@@ -92,6 +90,15 @@ class PipelineOrchestrator:
 
         companies = await self._stage1_find_companies(seed_domain)
         contacts = await self._stage2_find_contacts(companies)
+
+        # Delay before Stage 3 to respect Prospeo rate limits
+        delay = self._settings.prospeo_enrich_delay_seconds
+        if contacts and delay > 0:
+            logger.info(
+                f"Pausing {delay}s before email enrichment to respect rate limits"
+            )
+            await asyncio.sleep(delay)
+
         leads = await self._stage3_resolve_emails(contacts)
 
         logger.info(
@@ -116,17 +123,17 @@ class PipelineOrchestrator:
     # ── Stage implementations ──────────────────────────────────────────────────
 
     async def _stage1_find_companies(self, seed_domain: str) -> list[Company]:
-        stage = self._metrics.add_stage("[1/4] Ocean.io — Find similar companies")
+        stage = self._metrics.add_stage("[1/4] Apollo.io — Find similar companies")
         stage.start()
         task: TaskID = self._progress.add_task(
-            "[cyan][1/4] Ocean.io[/cyan]  Finding similar companies…",
+            "[cyan][1/4] Apollo.io[/cyan]  Finding similar companies…",
             total=1,
         )
 
         # Check resume checkpoint
-        if self._resumable.get_stage_done("ocean"):
+        if self._resumable.get_stage_done("apollo"):
             logger.info("Stage 1: resuming from checkpoint")
-            raw = self._resumable.get_stage_data("ocean")
+            raw = self._resumable.get_stage_data("apollo")
             companies = [Company(**c) for c in raw]
             self._progress.update(task, completed=1)
             stage.input_count = 1
@@ -136,21 +143,21 @@ class PipelineOrchestrator:
             return companies
 
         try:
-            async with OceanClient(self._settings) as client:
+            async with ApolloClient(self._settings) as client:
                 companies = await client.find_similar_companies(
                     seed_domain=seed_domain,
                     limit=self._max_companies,
                 )
-        except (OceanError, PipelineError) as exc:
+        except (ApolloError, PipelineError) as exc:
             logger.error(f"Stage 1 failed: {exc}")
-            self._record_failure("ocean", str(exc))
+            self._record_failure("apollo", str(exc))
             stage.success = False
             stage.finish()
             self._progress.update(task, completed=1)
             return []
 
         companies = deduplicate_companies(companies)
-        self._resumable.mark_stage_done("ocean", [c.model_dump() for c in companies])
+        self._resumable.mark_stage_done("apollo", [c.model_dump() for c in companies])
 
         stage.input_count = 1
         stage.output_count = len(companies)
@@ -172,9 +179,9 @@ class PipelineOrchestrator:
             total=len(companies),
         )
 
-        # Check resume checkpoint
+        # Check full-stage resume checkpoint
         if self._resumable.get_stage_done("prospeo"):
-            logger.info("Stage 2: resuming from checkpoint")
+            logger.info("Stage 2: resuming from full-stage checkpoint")
             raw = self._resumable.get_stage_data("prospeo")
             contacts = [Contact(**c) for c in raw]
             self._progress.update(task, completed=len(companies))
@@ -183,34 +190,56 @@ class PipelineOrchestrator:
             self._metrics.contacts_found = len(contacts)
             return contacts
 
-        all_contacts: list[Contact] = []
+        # Check per-item checkpoint — skip companies already processed
+        pending_companies = [
+            c for c in companies
+            if not self._resumable.is_item_processed("prospeo", c.domain)
+        ]
+        if len(pending_companies) < len(companies):
+            logger.info(
+                f"Stage 2: resuming {len(pending_companies)}/{len(companies)} companies"
+            )
+            all_contacts = [
+                Contact(**c)
+                for c in self._resumable.get_item_results("prospeo")
+            ]
+            self._progress.update(task, completed=len(companies) - len(pending_companies))
+        else:
+            all_contacts = []
 
-        async def _fetch_for_company(company: Company) -> list[Contact]:
+        async def _fetch_for_company(company: Company) -> None:
             """Isolated per-company fetch — one company failing doesn't stop others."""
             async with self._semaphore:
                 try:
                     async with ProspeoClient(self._settings) as client:
-                        return await client.get_decision_makers(
+                        company_contacts = await client.search_decision_makers(
                             domain=company.domain,
                             limit=self._settings.max_contacts_per_company,
                         )
                 except (ProspeoError, CircuitOpenError) as exc:
                     logger.warning(f"Stage 2: failed for {company.domain}: {exc}")
                     self._record_failure("prospeo", str(exc), context=company.domain)
-                    return []
+                    company_contacts = []
                 except Exception as exc:
                     logger.error(f"Stage 2: unexpected error for {company.domain}: {exc}")
-                    return []
+                    company_contacts = []
 
-        # Run all company lookups in parallel, bounded by semaphore
-        tasks = [_fetch_for_company(c) for c in companies]
-        results = await asyncio.gather(*tasks)
-
-        for company_contacts, _ in zip(results, companies):
-            all_contacts.extend(company_contacts)
+            # Checkpoint per company immediately
+            for contact in company_contacts:
+                all_contacts.append(contact)
+            self._resumable.mark_item_processed(
+                "prospeo", company.domain,
+                data=[c.model_dump() for c in company_contacts]
+            )
             self._progress.advance(task)
 
+        # Run all pending company lookups in parallel, bounded by semaphore
+        tasks = [_fetch_for_company(c) for c in pending_companies]
+        await asyncio.gather(*tasks)
+
         all_contacts = deduplicate_contacts(all_contacts)
+        # Clear per-item checkpoint and save full stage checkpoint
+        self._resumable.clear_item_checkpoint("prospeo")
         self._resumable.mark_stage_done("prospeo", [c.model_dump() for c in all_contacts])
 
         stage.output_count = len(all_contacts)
@@ -223,18 +252,18 @@ class PipelineOrchestrator:
         if not contacts:
             return []
 
-        stage = self._metrics.add_stage("[3/4] EazyReach — Resolve work emails")
+        stage = self._metrics.add_stage("[3/4] Prospeo — Bulk enrich emails")
         stage.start()
         stage.input_count = len(contacts)
         task = self._progress.add_task(
-            "[yellow][3/4] EazyReach[/yellow]  Resolving work emails…",
+            "[yellow][3/4] Prospeo[/yellow]  Resolving work emails…",
             total=len(contacts),
         )
 
-        # Check resume checkpoint
-        if self._resumable.get_stage_done("eazyreach"):
-            logger.info("Stage 3: resuming from checkpoint")
-            raw = self._resumable.get_stage_data("eazyreach")
+        # Check full-stage resume checkpoint
+        if self._resumable.get_stage_done("prospeo_email"):
+            logger.info("Stage 3: resuming from full-stage checkpoint")
+            raw = self._resumable.get_stage_data("prospeo_email")
             leads = [Lead(**l) for l in raw]
             self._progress.update(task, completed=len(contacts))
             stage.output_count = len(leads)
@@ -242,38 +271,47 @@ class PipelineOrchestrator:
             self._metrics.verified_emails = len(leads)
             return leads
 
+        # Separate contacts that already have email from Stage 2
+        contacts_with_email = [c for c in contacts if c.email]
+        contacts_needing_email = [c for c in contacts if not c.email and c.person_id]
+
         leads: list[Lead] = []
+        for contact in contacts_with_email:
+            leads.append(Lead(contact=contact, email=contact.email))
 
-        async def _resolve_one(contact: Contact) -> Optional[Lead]:
-            async with self._semaphore:
-                try:
-                    async with EazyReachClient(self._settings) as client:
-                        email = await client.get_email(contact.linkedin_url)
-                    if not email:
-                        return None
-                    return Lead(contact=contact, email=email)
-                except (EazyReachError, CircuitOpenError) as exc:
-                    logger.warning(f"Stage 3: failed for {contact.linkedin_url}: {exc}")
-                    self._record_failure(
-                        "eazyreach", str(exc), context=contact.linkedin_url
-                    )
-                    return None
-                except Exception as exc:
-                    logger.error(f"Stage 3: unexpected error: {exc}")
-                    return None
+        # Bulk enrich all contacts needing emails in one (or few) API calls
+        if contacts_needing_email:
+            try:
+                async with ProspeoClient(self._settings) as client:
+                    email_map = await client.bulk_enrich_emails(contacts_needing_email)
 
-        tasks = [_resolve_one(c) for c in contacts]
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            if result:
-                leads.append(result)
-            self._progress.advance(task)
+                for contact in contacts_needing_email:
+                    email = email_map.get(contact.person_id)
+                    if email:
+                        lead = Lead(contact=contact, email=email)
+                        leads.append(lead)
+                    self._progress.advance(task)
+            except (ProspeoError, CircuitOpenError) as exc:
+                logger.warning(f"Stage 3: bulk enrich failed: {exc}")
+                self._record_failure("prospeo_email", str(exc))
+                # Advance progress for all pending contacts
+                for _ in contacts_needing_email:
+                    self._progress.advance(task)
+            except Exception as exc:
+                logger.error(f"Stage 3: unexpected error: {exc}")
+                for _ in contacts_needing_email:
+                    self._progress.advance(task)
+        else:
+            self._progress.update(task, completed=len(contacts))
 
         leads = deduplicate_leads(leads)
-        self._resumable.mark_stage_done(
-            "eazyreach",
-            [l.model_dump(mode="json") for l in leads],
-        )
+        # Only checkpoint Stage 3 if we actually got some emails.
+        # If bulk enrich failed, we want resume to retry Stage 3.
+        if leads:
+            self._resumable.mark_stage_done(
+                "prospeo_email",
+                [l.model_dump(mode="json") for l in leads],
+            )
 
         stage.output_count = len(leads)
         stage.finish()
@@ -362,6 +400,7 @@ class PipelineOrchestrator:
         path.parent.mkdir(parents=True, exist_ok=True)
         fieldnames = [
             "company", "contact", "title", "linkedin", "email",
+            "email_subject", "email_body",
             "email_sent", "timestamp",
         ]
         with path.open("w", newline="", encoding="utf-8") as f:

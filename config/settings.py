@@ -29,9 +29,8 @@ class Settings(BaseSettings):
     )
 
     # ── API Keys ──────────────────────────────────────────────────────────────
-    ocean_api_key: str = Field(..., description="Ocean.io API key")
+    apollo_api_key: str = Field(..., description="Apollo.io API key")
     prospeo_api_key: str = Field(..., description="Prospeo API key")
-    eazyreach_api_key: str = Field(..., description="EazyReach API key")
     brevo_api_key: str = Field(..., description="Brevo (Sendinblue) API key")
     openai_api_key: str = Field(..., description="OpenAI API key for email copy generation")
 
@@ -57,6 +56,10 @@ class Settings(BaseSettings):
     # ── Email generation (OpenAI) ─────────────────────────────────────────────
     openai_model: str = Field("gpt-4o-mini", description="OpenAI model for email copy")
     email_max_words: int = Field(120, ge=50, le=300)
+
+    # ── Rate-limit pauses (seconds) ────────────────────────────────────────────
+    # Prospeo free plan needs a pause between search and enrich calls
+    prospeo_enrich_delay_seconds: int = Field(15, ge=0, le=300)
 
     @field_validator("log_level")
     @classmethod

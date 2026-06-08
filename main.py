@@ -15,12 +15,12 @@ Interview talking point:
 
 import asyncio
 import json
+import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
-from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
@@ -37,7 +37,7 @@ from rich.text import Text
 
 from config.settings import Settings
 from services.orchestrator import PipelineOrchestrator
-from utils.logger import get_logger
+from utils.logger import get_logger, setup_logging
 from utils.metrics import PipelineMetrics
 from utils.resume import ResumableRun
 
@@ -150,9 +150,9 @@ def run(
 
     \b
     Stages:
-      [1/4] Ocean.io   — find lookalike companies
+      [1/4] Apollo.io  — find lookalike companies
       [2/4] Prospeo    — extract decision-makers + LinkedIn URLs
-      [3/4] EazyReach  — resolve verified work emails
+      [3/4] Prospeo    — resolve work emails (email-finder)
       [4/4] Brevo      — send personalised outreach emails
 
     Example:
@@ -160,10 +160,6 @@ def run(
       python main.py stripe.com --dry-run
       python main.py notion.so --resume --max-companies 50
     """
-    _print_banner()
-    logger.info("Pipeline started", extra={"domain": domain, "dry_run": dry_run})
-    start_time = datetime.utcnow()
-
     # ── Config ──────────────────────────────────────────────────────────────
     try:
         settings = Settings()
@@ -171,6 +167,11 @@ def run(
         console.print(f"[bold red]Configuration error:[/bold red] {exc}")
         console.print("Ensure your .env file is populated. See README.md.")
         raise typer.Exit(code=1)
+
+    setup_logging(log_file=settings.log_file, level=settings.log_level)
+    _print_banner()
+    logger.info("Pipeline started", extra={"domain": domain, "dry_run": dry_run})
+    start_time = datetime.now(timezone.utc)
 
     # ── Resume support ───────────────────────────────────────────────────────
     resumable = ResumableRun(domain)
@@ -201,56 +202,75 @@ def run(
     )
 
     # ── Execute pipeline ─────────────────────────────────────────────────────
-    with progress:
-        result = asyncio.run(
-            orchestrator.execute(seed_domain=domain)
-        )
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    # ── Metrics display ──────────────────────────────────────────────────────
-    console.print()
-    _print_stage_table(result.metrics)
-    console.print()
+    # Graceful shutdown on Ctrl+C — save checkpoint before exit
+    def _signal_handler(sig, frame):
+        console.print("\n[bold red]Interrupted — saving checkpoint…[/bold red]")
+        resumable.save()
+        loop.stop()
+        sys.exit(130)
 
-    if not result.leads:
-        console.print("[bold red]No leads found — nothing to send.[/bold red]")
-        raise typer.Exit(code=0)
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
 
-    # ── Safety checkpoint ────────────────────────────────────────────────────
-    if dry_run:
-        console.print(
-            "[bold yellow]--dry-run active:[/bold yellow] "
-            "skipping email send. CSV written regardless."
-        )
-        confirmed = False
-    else:
-        confirmed = _safety_checkpoint(
-            companies=result.metrics.companies_found,
-            contacts=result.metrics.contacts_found,
-            verified=result.metrics.verified_emails,
-        )
+    result = None
+    try:
+        with progress:
+            result = loop.run_until_complete(
+                orchestrator.execute(seed_domain=domain)
+            )
 
-    # ── Stage 4: Send emails ──────────────────────────────────────────────────
-    if confirmed:
-        console.print("[bold green]Sending emails…[/bold green]")
-        send_result = asyncio.run(
-            orchestrator.send_emails(leads=result.leads)
-        )
-        result.metrics.emails_sent = send_result.sent
-        result.metrics.emails_failed = send_result.failed
-        logger.info(
-            "Emails sent",
-            extra={"sent": send_result.sent, "failed": send_result.failed},
-        )
-    else:
-        console.print("[dim]Email send skipped.[/dim]")
+        # ── Metrics display ──────────────────────────────────────────────────
+        console.print()
+        _print_stage_table(result.metrics)
+        console.print()
+
+        if not result.leads:
+            console.print("[bold red]No leads found — nothing to send.[/bold red]")
+            # DON'T clear checkpoint — user may want to resume after fixing Stage 3
+            raise typer.Exit(code=0)
+
+        # ── Safety checkpoint ────────────────────────────────────────────────
+        if dry_run:
+            console.print(
+                "[bold yellow]--dry-run active:[/bold yellow] "
+                "skipping email send. CSV written regardless."
+            )
+            confirmed = False
+        else:
+            confirmed = _safety_checkpoint(
+                companies=result.metrics.companies_found,
+                contacts=result.metrics.contacts_found,
+                verified=result.metrics.verified_emails,
+            )
+
+        # ── Stage 4: Send emails ─────────────────────────────────────────────
+        if confirmed:
+            console.print("[bold green]Sending emails…[/bold green]")
+            send_result = loop.run_until_complete(
+                orchestrator.send_emails(leads=result.leads)
+            )
+            result.metrics.emails_sent = send_result.sent
+            result.metrics.emails_failed = send_result.failed
+            logger.info(
+                "Emails sent",
+                extra={"sent": send_result.sent, "failed": send_result.failed},
+            )
+        else:
+            console.print("[dim]Email send skipped.[/dim]")
+    finally:
+        loop.close()
 
     # ── Write outputs ─────────────────────────────────────────────────────────
-    orchestrator.write_csv(result.leads, Path("data/output.csv"))
-    if output_json:
-        orchestrator.write_json(result.leads, Path("data/output.json"))
+    if result and result.leads:
+        orchestrator.write_csv(result.leads, Path("data/output.csv"))
+        if output_json:
+            orchestrator.write_json(result.leads, Path("data/output.json"))
 
     # ── Final summary ─────────────────────────────────────────────────────────
-    elapsed = (datetime.utcnow() - start_time).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
     console.print()
     console.print(
         Panel.fit(
@@ -271,7 +291,8 @@ def run(
             "emails_sent": result.metrics.emails_sent,
         },
     )
-    resumable.clear()  # clean up checkpoint on successful completion
+    # Clear checkpoint only after a fully successful run (leads found + emails sent/dry-run)
+    resumable.clear()
 
 
 if __name__ == "__main__":

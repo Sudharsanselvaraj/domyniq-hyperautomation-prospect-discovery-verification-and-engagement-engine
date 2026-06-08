@@ -1,17 +1,21 @@
 """
-clients/prospeo_client.py — Prospeo API Client
+clients/prospeo_client.py — Prospeo API Client (New API v2)
 
-Stage 2: Given company domains, find C-suite / VP decision-makers
-         with their LinkedIn profile URLs.
+Stage 2: Search for decision-makers at a company domain.
+Stage 3: Bulk-enrich those contacts to get verified work emails.
 
-Prospeo API docs: https://app.prospeo.io/api
+Prospeo API docs: https://prospeo.io/api-docs
 Auth: X-KEY header
-Key endpoint: POST /domain-search
+
+Note: Prospeo recently migrated to a new API. The old /domain-search endpoint
+is deprecated. The new flow is:
+  1. POST /search-person   — find people by company + seniority (no email)
+  2. POST /bulk-enrich-person — enrich up to 50 person_ids at once (get email)
 
 Interview talking point:
-  "Prospeo is per-credit — every call costs money. I batch
-   by domain and respect the response pagination to avoid
-   duplicate requests. I also honour their documented rate limits."
+  "Prospeo deprecated their old domain-search endpoint. I migrated to their
+   new search + bulk-enrich flow. Bulk enrichment is more efficient —
+   one call for 50 contacts instead of 50 individual calls."
 """
 
 from typing import Optional
@@ -24,10 +28,16 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Seniority levels we care about (Prospeo filter values)
-TARGET_SENIORITY = {
-    "c_suite", "vp", "director", "head", "owner", "partner", "founder",
-}
+# Seniority values Prospeo accepts (from their ENUM)
+TARGET_SENIORITY = [
+    "C-Suite",
+    "Vice President",
+    "Director",
+    "Head",
+    "Founder/Owner",
+    "Partner",
+    "Senior",
+]
 
 
 class ProspeoClient(BaseClient):
@@ -44,71 +54,64 @@ class ProspeoClient(BaseClient):
             "Accept": "application/json",
         }
 
-    async def get_decision_makers(
+    async def search_decision_makers(
         self,
         domain: str,
         limit: int = 5,
     ) -> list[Contact]:
         """
-        POST /domain-search — return decision-makers for a company domain.
+        POST /search-person — find decision-makers at a company.
 
-        We filter for C-suite / VP / Director seniority on our side
-        (Prospeo also exposes a filter param, used here as belt-and-suspenders).
+        Filters:
+          • company.websites.include = [domain]
+          • person_seniority.include = [C-Suite, VP, Director, ...]
+
+        Returns Contact objects with person_id (needed for enrichment).
+        Email is NOT included — Stage 3 bulk-enrich resolves that.
         """
         logger.debug(
-            "Prospeo: searching domain",
+            "Prospeo: searching decision-makers",
             extra={"domain": domain, "limit": limit},
         )
 
         payload = {
-            "company": domain,
-            "limit": limit,
-            "seniority": list(TARGET_SENIORITY),
+            "page": 1,
+            "filters": {
+                "company": {
+                    "websites": {
+                        "include": [domain],
+                    }
+                },
+                "person_seniority": {
+                    "include": TARGET_SENIORITY,
+                },
+            },
         }
 
         try:
-            data = await self._post("/domain-search", json=payload)
+            data = await self._post("/search-person", json=payload)
         except Exception as exc:
             raise ProspeoError(
-                f"Failed to fetch contacts for {domain}: {exc}",
+                f"Failed to search contacts for {domain}: {exc}",
                 service=self.service_name,
             ) from exc
 
-        contacts = self._parse_response(data, domain)
+        contacts = self._parse_search_response(data, domain)
+        # Respect the caller's limit (API returns up to 25 per page)
+        contacts = contacts[:limit]
         logger.debug(
             "Prospeo: contacts found",
             extra={"domain": domain, "count": len(contacts)},
         )
         return contacts
 
-    def _parse_response(self, data: dict, domain: str) -> list[Contact]:
-        """
-        Parse Prospeo domain-search response.
-
-        Expected shape:
-        {
-          "response": [
-            {
-              "full_name": "Jane Smith",
-              "job_title": "Chief Marketing Officer",
-              "linkedin_url": "https://linkedin.com/in/janesmith",
-              "company": "Acme Corp"
-            },
-            ...
-          ]
-        }
-        """
-        raw_list = (
-            data.get("response")
-            or data.get("contacts")
-            or data.get("results")
-            or data.get("data")
-            or []
-        )
+    def _parse_search_response(self, data: dict, domain: str) -> list[Contact]:
+        """Parse /search-person response into Contact objects."""
+        raw_list = data.get("results") or []
 
         if not isinstance(raw_list, list):
             raise ValidationError(
-                "Prospeo response is not a list",
+                "Prospeo search response is not a list",
                 context={"domain": domain, "keys": list(data.keys())},
             )
 
@@ -117,35 +120,34 @@ class ProspeoClient(BaseClient):
             if not isinstance(item, dict):
                 continue
 
-            name = (
-                item.get("full_name")
-                or item.get("name")
-                or f"{item.get('first_name', '')} {item.get('last_name', '')}".strip()
-            )
-            title = item.get("job_title") or item.get("title") or item.get("position") or ""
-            linkedin = (
-                item.get("linkedin_url")
-                or item.get("linkedin")
-                or item.get("profile_url")
-                or ""
-            )
+            person = item.get("person") or {}
+            company = item.get("company") or {}
 
-            if not name or not linkedin:
-                logger.debug(f"Skipping contact missing name or LinkedIn: {item}")
+            person_id = person.get("person_id") or person.get("id")
+            if not person_id:
                 continue
 
-            # Filter to decision-makers only (belt-and-suspenders check)
-            if title and not self._is_decision_maker(title):
-                logger.debug(f"Skipping non-DM title: {title}")
+            name = person.get("full_name") or ""
+            if not name:
+                first = person.get("first_name", "")
+                last = person.get("last_name", "")
+                name = f"{first} {last}".strip()
+
+            title = person.get("current_job_title") or person.get("title") or "Unknown"
+            linkedin = person.get("linkedin_url") or ""
+
+            if not name or not linkedin:
+                logger.debug(f"Skipping contact missing name or LinkedIn: {person}")
                 continue
 
             try:
                 contact = Contact(
                     name=name,
-                    title=title or "Unknown",
+                    title=title,
                     linkedin_url=linkedin,
                     company_domain=domain,
-                    company_name=item.get("company") or item.get("company_name"),
+                    company_name=company.get("name"),
+                    person_id=person_id,
                 )
                 contacts.append(contact)
             except Exception as exc:
@@ -154,17 +156,64 @@ class ProspeoClient(BaseClient):
 
         return contacts
 
-    @staticmethod
-    def _is_decision_maker(title: str) -> bool:
+    async def bulk_enrich_emails(
+        self,
+        contacts: list[Contact],
+    ) -> dict[str, str]:
         """
-        Heuristic filter: does the title suggest purchase authority?
-        We'd rather include a borderline title than miss a real buyer.
+        POST /bulk-enrich-person — resolve emails for up to 50 contacts at once.
+
+        Args:
+            contacts: List of Contact objects with person_id set.
+
+        Returns:
+            Mapping of person_id → verified email address.
         """
-        title_lower = title.lower()
-        keywords = {
-            "ceo", "cto", "cmo", "coo", "cfo", "cso", "cpo", "chief",
-            "vp ", "vice president", "director", "head of", "head,",
-            "president", "founder", "co-founder", "owner", "partner",
-            "managing", "general manager", "gm ",
-        }
-        return any(kw in title_lower for kw in keywords)
+        if not contacts:
+            return {}
+
+        logger.debug(
+            "Prospeo: bulk enriching emails",
+            extra={"count": len(contacts)},
+        )
+
+        # Prospeo allows up to 50 per bulk request
+        BATCH_SIZE = 50
+        email_map: dict[str, str] = {}
+
+        for i in range(0, len(contacts), BATCH_SIZE):
+            batch = contacts[i : i + BATCH_SIZE]
+            payload = {
+                "only_verified_email": True,
+                "data": [
+                    {
+                        "identifier": c.person_id,
+                        "person_id": c.person_id,
+                    }
+                    for c in batch
+                    if c.person_id
+                ],
+            }
+
+            if not payload["data"]:
+                continue
+
+            try:
+                data = await self._post("/bulk-enrich-person", json=payload)
+            except Exception as exc:
+                logger.warning(f"Prospeo bulk enrich failed: {exc}")
+                continue
+
+            for match in data.get("matched", []):
+                person_id = match.get("identifier")
+                person_data = match.get("person") or {}
+                email_obj = person_data.get("email") or {}
+                email = email_obj.get("email") or email_obj.get("revealed_email")
+                if person_id and email and "@" in email:
+                    email_map[person_id] = email.strip().lower()
+
+        logger.debug(
+            "Prospeo: bulk enrich complete",
+            extra={"requested": len(contacts), "resolved": len(email_map)},
+        )
+        return email_map
