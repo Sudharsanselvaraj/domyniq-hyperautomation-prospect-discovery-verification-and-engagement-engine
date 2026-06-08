@@ -1,50 +1,74 @@
 <div align="center">
-
-<table>
-<tr>
-<td width="160" align="center">
-
-<img src="assets/ChatGPT Image Jun 8, 2026, 08_33_22 AM.png" width="100">
-
-</td>
-
-<td align="left">
-
-<h1 style="border-bottom:none;margin-bottom:0;">Domyniq</h1>
-
-<p>
-Hyperautomation Prospect Discovery,<br>
-Verification & Engagement Engine
-</p>
-
-</td>
-</tr>
-</table>
-
-<p align="center">
-
-<img src="https://img.shields.io/badge/license-MIT-green">
-<img src="https://img.shields.io/badge/python-3.10+-blue">
-<img src="https://img.shields.io/badge/version-v1.0.0-blue">
-<img src="https://img.shields.io/badge/status-production-success">
-<img src="https://img.shields.io/badge/architecture-agentic-purple">
-
-</p>
-
+  <img alt="Domyniq Logo" src="assets/ChatGPT Image Jun 8, 2026, 08_33_22 AM.png" width="45%">
 </div>
 
----
+<div align="center">
+  <h3>Autonomous Prospect Intelligence Platform.</h3>
+</div>
 
-Domyniq is an autonomous prospect intelligence platform that transforms a single company domain into verified decision-makers and personalized outreach campaigns.
+<div align="center">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/version-v1.0.0-blue" alt="Version">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/status-production-success" alt="Status">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/architecture-agentic-purple" alt="Architecture">
+  </a>
+</div>
 
-It orchestrates company discovery, contact enrichment, email verification, AI-powered personalization, and outbound delivery through a resilient hyperautomation pipeline.
+<br>
 
-> One domain in. Verified prospects out. Personalized outreach delivered.
+Domyniq is an autonomous prospect intelligence platform that transforms a single company domain into verified decision-makers and personalized outreach campaigns. It orchestrates company discovery, contact enrichment, email verification, AI-powered personalization, and outbound delivery through a resilient hyperautomation pipeline.
 
 > [!TIP]
->
-> For a complete walkthrough of the pipeline architecture, integrations, and workflow orchestration, check the documentation and architecture diagrams below.
----
+> Just getting started? Domyniq can discover lookalike companies, identify decision-makers, verify professional contact information, generate personalized outreach, and deliver campaigns through a human-in-the-loop workflow.
+
+## Quickstart
+
+```bash
+git clone https://github.com/<your-username>/domyniq-hyperautomation-prospect-discovery-verification-and-engagement-engine.git
+
+cd domyniq-hyperautomation-prospect-discovery-verification-and-engagement-engine
+
+pip install -r requirements.txt
+
+# or
+
+uv sync
+```
+
+```bash
+cp .env.example .env
+```
+
+```env
+APOLLO_API_KEY=
+PROSPEO_API_KEY=
+EAZYREACH_API_KEY=
+OPENAI_API_KEY=
+BREVO_API_KEY=
+```
+
+```python
+from domyniq import Domyniq
+
+pipeline = Domyniq()
+
+results = pipeline.run(
+    domain="openai.com",
+    max_companies=5
+)
+
+print(results.summary())
+```
 
 ## Table of Contents
 
