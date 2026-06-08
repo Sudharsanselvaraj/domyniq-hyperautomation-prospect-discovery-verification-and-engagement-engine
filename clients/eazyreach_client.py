@@ -1,17 +1,21 @@
 """
 clients/eazyreach_client.py — EazyReach API Client
 
+⚠️  ARCHIVAL — ORIGINAL IMPLEMENTATION
+This was the Stage 3 client in the first iteration of the pipeline.
+It was replaced by ProspeoClient.bulk_enrich_emails() (clients/prospeo_client.py)
+because EazyReach suspended free credits during the assignment window.
+
+The file is kept in the repo to show:
+  1. The original architectural intent (LinkedIn URL → work email resolution)
+  2. How a single-contact enrich client is structured
+  3. Interview evidence that a pivot was made deliberately, not by accident
+
 Stage 3: Resolve LinkedIn profile URLs to verified work email addresses.
 
 EazyReach docs: https://eazyreach.app
-Auth: API key in X-API-Key header (or Bearer — check actual docs)
+Auth: API key in X-API-Key header
 Key endpoint: POST /api/v1/email  (single resolve)
-
-Interview talking point:
-  "EazyReach is credit-limited — each call is expensive.
-   I only call it for contacts that passed Stage 2 validation
-   (have a real LinkedIn URL) and I skip retries on 404 responses
-   because 'not found' won't change on retry."
 """
 
 from clients.base import BaseClient

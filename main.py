@@ -137,7 +137,7 @@ def run(
         25,
         "--max-companies",
         "-n",
-        help="Maximum number of similar companies to fetch from Ocean.io.",
+        help="Maximum number of similar companies to fetch from Apollo.io.",
     ),
     output_json: bool = typer.Option(
         False,
@@ -268,6 +268,16 @@ def run(
         orchestrator.write_csv(result.leads, Path("data/output.csv"))
         if output_json:
             orchestrator.write_json(result.leads, Path("data/output.json"))
+
+    # ── Failure report (bonus requirement) ────────────────────────────────────
+    if result and result.failures:
+        failures_path = Path("data/failures.json")
+        failures_path.parent.mkdir(parents=True, exist_ok=True)
+        failures_path.write_text(
+            json.dumps(result.failures, indent=2, default=str),
+            encoding="utf-8",
+        )
+        console.print(f"  Failure report : [yellow]{failures_path}[/yellow] ({len(result.failures)} items)")
 
     # ── Final summary ─────────────────────────────────────────────────────────
     elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()

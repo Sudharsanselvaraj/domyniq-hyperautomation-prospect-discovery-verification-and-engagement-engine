@@ -24,8 +24,8 @@ Built as a production-quality solution for the Vocallabs SDE take-home assignmen
               │      │      │      │
          [1/4]│ [2/4]│ [3/4]│ [4/4]│
               ▼      ▼      ▼      ▼
-           Ocean  Prospeo  Eazy   Brevo
-            .io          Reach
+          Apollo  Prospeo Prospeo Brevo
+           .io    Search  Enrich  + OpenAI
               │      │      │      │
               └──────┴──────┴──────┘
                          │
@@ -48,9 +48,10 @@ outreach_pipeline/
 ├── clients/
 │   ├── __init__.py
 │   ├── base.py                # BaseClient: retry + circuit breaker
-│   ├── ocean_client.py        # Stage 1: find similar companies
-│   ├── prospeo_client.py      # Stage 2: find decision-makers
-│   ├── eazyreach_client.py    # Stage 3: resolve work emails
+│   ├── apollo_client.py       # Stage 1: find similar companies
+│   ├── prospeo_client.py      # Stage 2 & 3: find decision-makers + bulk enrich emails
+│   ├── ocean_client.py        # (archival) original Stage 1 client
+│   ├── eazyreach_client.py    # (archival) original Stage 3 client
 │   └── brevo_client.py        # Stage 4: send outreach emails
 ├── services/
 │   ├── __init__.py
@@ -123,16 +124,16 @@ python -c "from config.settings import Settings; print('Config OK:', Settings())
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OCEAN_API_KEY` | ✅ | Ocean.io API key |
-| `PROSPEO_API_KEY` | ✅ | Prospeo API key |
-| `EAZYREACH_API_KEY` | ✅ | EazyReach API key |
-| `BREVO_API_KEY` | ✅ | Brevo SMTP API key |
+| `APOLLO_API_KEY` | ✅ | Apollo.io API key (Stage 1) |
+| `PROSPEO_API_KEY` | ✅ | Prospeo API key (Stages 2 & 3) |
+| `BREVO_API_KEY` | ✅ | Brevo SMTP API key (Stage 4) |
 | `OPENAI_API_KEY` | ✅ | OpenAI key for email generation |
 | `SENDER_NAME` | ✅ | Your name (From field) |
 | `SENDER_EMAIL` | ✅ | Your verified Brevo sender email |
-| `MAX_SIMILAR_COMPANIES` | ○ | Max companies from Ocean.io (default: 25) |
+| `MAX_SIMILAR_COMPANIES` | ○ | Max companies from Apollo.io (default: 25) |
 | `MAX_CONTACTS_PER_COMPANY` | ○ | Max DMs per company (default: 5) |
 | `MAX_CONCURRENT_REQUESTS` | ○ | Parallel API calls (default: 10) |
+| `PROSPEO_ENRICH_DELAY_SECONDS` | ○ | Pause between search & enrich (default: 90) |
 | `LOG_LEVEL` | ○ | DEBUG/INFO/WARNING (default: INFO) |
 | `OPENAI_MODEL` | ○ | GPT model (default: gpt-4o-mini) |
 
@@ -181,21 +182,28 @@ python main.py --help
 ## Demo Instructions (Live Interview)
 
 1. Ensure `.env` is populated with real API keys
-2. Run a dry run first to verify all stages work:
+2. **Pre-warm (rate-limit workaround):**  
+   Prospeo's free tier needs ~90 s between search and bulk enrich.
+   Run a dry run 2–3 min before the interview to populate checkpoints:
    ```bash
-   python main.py <seed-domain> --dry-run
+   python main.py <seed-domain> --dry-run --max-companies 1
    ```
-3. Walk through the terminal output:
+3. **During the interview**, resume so only Stage 3 fires after the delay:
+   ```bash
+   python main.py <seed-domain> --resume --max-companies 1
+   ```
+4. Walk through the terminal output:
    - Stage progress bars
    - Pipeline summary table
    - Safety checkpoint prompt
-4. When ready to actually send:
+5. When ready to actually send:
    ```bash
    python main.py <seed-domain>
    ```
-5. Check outputs:
+6. Check outputs:
    ```bash
    cat data/output.csv
+   cat data/failures.json
    cat logs/pipeline.log | python -m json.tool | head -50
    ```
 

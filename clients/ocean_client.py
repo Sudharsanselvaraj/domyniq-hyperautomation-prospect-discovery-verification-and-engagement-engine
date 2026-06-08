@@ -1,16 +1,21 @@
 """
 clients/ocean_client.py — Ocean.io API Client
 
+⚠️  ARCHIVAL — ORIGINAL IMPLEMENTATION
+This was the Stage 1 client in the first iteration of the pipeline.
+It was replaced by ApolloClient (clients/apollo_client.py) because
+Ocean.io rejected new sign-ups during the assignment window.
+
+The file is kept in the repo to show:
+  1. The original architectural intent (industry-based lookalike search)
+  2. How a Stage 1 client is structured (seed domain → similar companies)
+  3. Interview evidence that a pivot was made deliberately, not by accident
+
 Stage 1: Given a seed company domain, find lookalike companies.
 
 Ocean.io API docs: https://docs.ocean.io/
 Auth: Bearer token in Authorization header
 Key endpoint: POST /v1/similar-companies
-
-Interview talking point:
-  "Ocean.io is the top of the funnel. A bad query here cascades
-   waste through every downstream stage, so I validate the seed
-   domain and cap results to avoid over-fetching."
 """
 
 from typing import Optional
