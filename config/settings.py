@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     # ── Email generation (OpenAI / xAI) ───────────────────────────────────────
     openai_model: str = Field("gpt-4o-mini", description="OpenAI model for email copy")
-    xai_model: str = Field("grok-2-latest", description="xAI Grok model for email copy")
+    xai_model: str = Field("grok-beta", description="xAI Grok model for email copy")
     email_max_words: int = Field(120, ge=50, le=300)
 
     # ── Rate-limit pauses (seconds) ────────────────────────────────────────────
