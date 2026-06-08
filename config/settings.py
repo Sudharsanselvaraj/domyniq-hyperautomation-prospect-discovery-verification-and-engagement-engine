@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     apollo_api_key: str = Field(..., description="Apollo.io API key")
     prospeo_api_key: str = Field(..., description="Prospeo API key")
     brevo_api_key: str = Field(..., description="Brevo (Sendinblue) API key")
-    openai_api_key: str = Field(..., description="OpenAI API key for email copy generation")
+    openai_api_key: str = Field("", description="OpenAI API key for email copy generation (optional if xai_api_key is set)")
+    xai_api_key: str = Field("", description="xAI API key for Grok email copy generation (optional if openai_api_key is set)")
 
     # ── Sender identity (Brevo) ───────────────────────────────────────────────
     sender_name: str = Field("Your Name", description="From name for outreach emails")
@@ -53,8 +54,9 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", description="Python logging level")
     log_file: str = Field("logs/pipeline.log")
 
-    # ── Email generation (OpenAI) ─────────────────────────────────────────────
+    # ── Email generation (OpenAI / xAI) ───────────────────────────────────────
     openai_model: str = Field("gpt-4o-mini", description="OpenAI model for email copy")
+    xai_model: str = Field("grok-2-latest", description="xAI Grok model for email copy")
     email_max_words: int = Field(120, ge=50, le=300)
 
     # ── Rate-limit pauses (seconds) ────────────────────────────────────────────

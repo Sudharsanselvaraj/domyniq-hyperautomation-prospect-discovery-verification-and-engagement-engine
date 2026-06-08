@@ -73,8 +73,19 @@ class EmailGeneratorService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._api_key = settings.openai_api_key
-        self._model = settings.openai_model
+        # Prefer xAI Grok if key is provided, fallback to OpenAI
+        if settings.xai_api_key:
+            self._api_key = settings.xai_api_key
+            self._model = settings.xai_model
+            self._base_url = "https://api.x.ai/v1/chat/completions"
+            self._provider = "xAI"
+        elif settings.openai_api_key:
+            self._api_key = settings.openai_api_key
+            self._model = settings.openai_model
+            self._base_url = "https://api.openai.com/v1/chat/completions"
+            self._provider = "OpenAI"
+        else:
+            raise EmailGenerationError("No AI API key configured. Set OPENAI_API_KEY or XAI_API_KEY in .env")
         self._max_words = settings.email_max_words
         self._system_prompt = SYSTEM_PROMPT_TEMPLATE.format(max_words=self._max_words)
 
@@ -119,12 +130,12 @@ class EmailGeneratorService:
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
         )
-        async def _call_openai() -> httpx.Response:
+        async def _call_api() -> httpx.Response:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._settings.request_timeout_seconds)
             ) as client:
                 resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
+                    self._base_url,
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
@@ -135,15 +146,15 @@ class EmailGeneratorService:
                 return resp
 
         try:
-            resp = await _call_openai()
+            resp = await _call_api()
         except RetryError as exc:
-            raise EmailGenerationError(f"OpenAI failed after retries: {exc}") from exc
+            raise EmailGenerationError(f"{self._provider} failed after retries: {exc}") from exc
         except httpx.HTTPStatusError as exc:
             raise EmailGenerationError(
-                f"OpenAI API error {exc.response.status_code}: {exc.response.text[:200]}"
+                f"{self._provider} API error {exc.response.status_code}: {exc.response.text[:200]}"
             ) from exc
         except httpx.RequestError as exc:
-            raise EmailGenerationError(f"OpenAI network error: {exc}") from exc
+            raise EmailGenerationError(f"{self._provider} network error: {exc}") from exc
 
         data = resp.json()
         raw_text = (
