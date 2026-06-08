@@ -21,6 +21,11 @@
   <a href="#">
     <img src="https://img.shields.io/badge/architecture-agentic-purple" alt="Architecture">
   </a>
+  <p align="center">
+  <a href="https://studio.explaino.app/view/8a02595d-9c11-42e6-a9ef-f71b0ee86c5d">
+    <img src="https://img.shields.io/badge/Watch-Demo%20Video-red?style=for-the-badge&logo=youtube" alt="Demo Video">
+  </a>
+</p>
 </div>
 
 Domyniq is an autonomous prospect intelligence platform that transforms a single company domain into verified decision-makers and personalized outreach campaigns. It orchestrates company discovery, contact enrichment, email verification, AI-powered personalization, and outbound delivery through a resilient hyperautomation pipeline.
