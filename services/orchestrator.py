@@ -71,11 +71,13 @@ class PipelineOrchestrator:
         progress: Progress,
         resumable: ResumableRun,
         max_companies: int = 25,
+        mock_enrich: bool = False,
     ) -> None:
         self._settings = settings
         self._progress = progress
         self._resumable = resumable
         self._max_companies = max_companies
+        self._mock_enrich = mock_enrich
         self._metrics = PipelineMetrics()
         self._failures: list[dict] = []
         # Semaphore limits concurrent API calls to avoid hammering rate limits
@@ -282,8 +284,17 @@ class PipelineOrchestrator:
         # Bulk enrich all contacts needing emails in one (or few) API calls
         if contacts_needing_email:
             try:
-                async with ProspeoClient(self._settings) as client:
-                    email_map = await client.bulk_enrich_emails(contacts_needing_email)
+                if self._mock_enrich:
+                    # Demo mode: synthesise emails without hitting Prospeo rate limits
+                    logger.info("Stage 3: MOCK enrich — generating synthetic emails for demo")
+                    email_map = {
+                        c.person_id: f"{c.name.lower().replace(' ', '.')}@{c.company_domain}"
+                        for c in contacts_needing_email
+                        if c.person_id
+                    }
+                else:
+                    async with ProspeoClient(self._settings) as client:
+                        email_map = await client.bulk_enrich_emails(contacts_needing_email)
 
                 for contact in contacts_needing_email:
                     email = email_map.get(contact.person_id)

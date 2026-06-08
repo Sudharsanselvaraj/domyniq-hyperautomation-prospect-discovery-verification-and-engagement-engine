@@ -143,6 +143,12 @@ def run(
         "--json-output",
         help="Also write results to data/output.json in addition to CSV.",
     ),
+    mock_enrich: bool = typer.Option(
+        False,
+        "--mock-enrich",
+        "-m",
+        help="Mock Stage 3 email enrichment for demo purposes (returns synthetic emails).",
+    ),
 ) -> None:
     """
     Run the full 4-stage cold outreach pipeline for a single seed domain.
@@ -198,6 +204,7 @@ def run(
         progress=progress,
         resumable=resumable,
         max_companies=max_companies,
+        mock_enrich=mock_enrich,
     )
 
     # ── Execute pipeline ─────────────────────────────────────────────────────
