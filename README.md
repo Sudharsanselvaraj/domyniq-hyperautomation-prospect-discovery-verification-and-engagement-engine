@@ -1,9 +1,49 @@
-# Domyniq — Hyperautomation Prospect Discovery, Verification & Engagement Engine
+<div align="center">
 
-> One domain in. Researched, verified, personalised emails out. Zero human steps in between.
+<table>
+<tr>
+<td width="160" align="center">
 
-Built for the **Vocallabs SDE take-home assignment** — a fully automated 4-stage B2B cold outreach pipeline that sources lookalike companies, identifies decision-makers, resolves verified work emails, and fires personalised AI-generated outreach — all from a single CLI command.
+<img src="./assets/domyniq-logo-white.png" width="120">
 
+</td>
+
+<td align="left">
+
+<h1 style="border-bottom:none;margin-bottom:0;">Domyniq</h1>
+
+<p>
+Hyperautomation Prospect Discovery,<br>
+Verification & Engagement Engine
+</p>
+
+</td>
+</tr>
+</table>
+
+<p align="center">
+
+<img src="https://img.shields.io/badge/license-MIT-green">
+<img src="https://img.shields.io/badge/python-3.10+-blue">
+<img src="https://img.shields.io/badge/version-v1.0.0-blue">
+<img src="https://img.shields.io/badge/status-production-success">
+<img src="https://img.shields.io/badge/architecture-agentic-purple">
+
+</p>
+
+</div>
+
+---
+
+Domyniq is an autonomous prospect intelligence platform that transforms a single company domain into verified decision-makers and personalized outreach campaigns.
+
+It orchestrates company discovery, contact enrichment, email verification, AI-powered personalization, and outbound delivery through a resilient hyperautomation pipeline.
+
+> One domain in. Verified prospects out. Personalized outreach delivered.
+
+> [!TIP]
+>
+> For a complete walkthrough of the pipeline architecture, integrations, and workflow orchestration, check the documentation and architecture diagrams below.
 ---
 
 ## Table of Contents
