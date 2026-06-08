@@ -37,7 +37,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT_TEMPLATE = """You are an expert B2B outreach copywriter.
-Your task: write a cold outreach email from a sales professional to a senior decision-maker.
+Your task: write a DOMYNIQ email from a sales professional to a senior decision-maker.
 
 Rules:
 - Professional and respectful tone
@@ -54,7 +54,7 @@ Output ONLY valid JSON in this exact format:
 }}
 No preamble, no markdown fences, only the JSON object."""
 
-USER_TEMPLATE = """Write a cold outreach email for the following contact:
+USER_TEMPLATE = """Write a DOMYNIQ email for the following contact:
 
 Contact name: {name}
 Job title: {title}
@@ -87,7 +87,7 @@ class EmailGeneratorService:
             self._provider = "OpenRouter"
             self._extra_headers = {
                 "HTTP-Referer": "https://localhost",
-                "X-Title": "Cold Outreach Pipeline",
+                "X-Title": "DOMYNIQ Pipeline",
             }
         elif settings.xai_api_key:
             self._api_key = settings.xai_api_key

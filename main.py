@@ -1,5 +1,5 @@
 """
-main.py — Cold Outreach Pipeline Entry Point
+main.py — DOMYNIQ Pipeline Entry Point
 
 This is the single CLI command that drives the entire 4-stage pipeline.
 Architecture note: we use Typer for ergonomic CLI definition and Rich for
@@ -43,7 +43,7 @@ from utils.resume import ResumableRun
 
 app = typer.Typer(
     name="outreach",
-    help="Automated cold-outreach pipeline: one domain → emails sent.",
+    help="Automated DOMYNIQ pipeline: one domain → emails sent.",
     add_completion=False,
 )
 console = Console()
@@ -52,9 +52,9 @@ logger = get_logger(__name__)
 
 def _print_banner() -> None:
     banner = Text()
-    banner.append("⚡ COLD OUTREACH PIPELINE", style="bold cyan")
+    banner.append("⚡ DOMYNIQ PIPELINE", style="bold cyan")
     banner.append(" v1.0.0\n", style="dim")
-    banner.append("Vocallabs SDE Assignment — Production Build", style="dim italic")
+    banner.append("DOMYNIQ Hyperautomation Engine — Production Build", style="dim italic")
     console.print(Panel(banner, border_style="cyan", padding=(1, 4)))
 
 
@@ -151,7 +151,7 @@ def run(
     ),
 ) -> None:
     """
-    Run the full 4-stage cold outreach pipeline for a single seed domain.
+    Run the full 4-stage DOMYNIQ pipeline for a single seed domain.
 
     \b
     Stages:

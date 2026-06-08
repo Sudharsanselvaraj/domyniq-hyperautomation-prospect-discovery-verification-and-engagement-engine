@@ -1,0 +1,7 @@
+[
+  {
+    "stage": "brevo",
+    "error": "Failed to send email to daniel.pages@google.com: Brevo: authentication failed [status_code=401, service=Brevo] [service=Brevo]",
+    "context": "daniel.pages@google.com"
+  }
+]

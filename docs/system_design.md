@@ -1,4 +1,4 @@
-# System Design: Cold Outreach Pipeline
+# System Design: DOMYNIQ Pipeline
 
 ## 1. High-Level Architecture
 

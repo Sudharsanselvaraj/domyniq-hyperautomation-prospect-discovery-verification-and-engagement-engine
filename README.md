@@ -410,7 +410,7 @@ python main.py salesforce.com --dry-run --max-companies 10 --json-output
 ```
 Usage: python main.py [OPTIONS] DOMAIN
 
-  Run the full 4-stage cold outreach pipeline for a single seed domain.
+  Run the full 4-stage DOMYNIQ pipeline for a single seed domain.
 
   Stages:
     [1/4] Apollo.io  — find lookalike companies
